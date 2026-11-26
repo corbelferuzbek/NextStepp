@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="uz">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NextStep</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<meta name="theme-color" content="#ffeaf4">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='18' fill='%23e0146f'/%3E%3Ctext x='32' y='41' font-size='26' font-family='sans-serif' font-weight='800' text-anchor='middle' fill='white'%3ENS%3C/text%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,500;0,9..144,600;1,9..144,500&family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="aurora" aria-hidden="true"><i></i><i></i><i></i></div>
+<header class="top">
+  <div class="wrap bar">
+    <a class="logo" href="#/"><i>NS</i>NextStep</a>
+    <nav id="links"></nav>
+    <div class="right">
+      <span class="chip" id="coins" hidden></span>
+      <select id="lang" aria-label="Language">
+        <option value="uz">O‘zbekcha</option>
+        <option value="en">English</option>
+        <option value="ru">Русский</option>
+      </select>
+      <button class="btn ghost sm" id="out" data-act="logout" hidden></button>
+    </div>
+  </div>
+</header>
+<main class="wrap" id="app"></main>
+<footer class="foot">© 2026 <b>NextStep</b> · Learn · Build · Shine ✦</footer>
+<div id="toast" role="status"></div>
+
+
+
+
+
+<script src="https://cdn.jsdelivr.net/npm/marked@15.0.12/marked.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/dompurify@3.2.6/dist/purify.min.js"></script>
+<script src="/static/i18n.js"></script>
+<script src="/static/data.js"></script>
+<script src="/static/script.js"></script>
+<script src="/static/admin.js"></script>
+<script src="/static/backend.js"></script>
+</body>
+</html>

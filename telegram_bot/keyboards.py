@@ -105,15 +105,7 @@ def admin_panel(is_owner):
         [_btn("➕ Yangi quiz", "adm:new_quiz"), _btn("🗑 Quizni o'chirish", "adm:del_quiz")],
         [_btn("📢 E'lon yuborish", "adm:broadcast"), _btn("📊 Statistika", "adm:stats")],
         [_btn("📥 Natijalar (CSV)", "adm:export")],
-        [
-    _btn("➕ Yangi quiz", "adm:new_quiz"),
-    _btn("🗳 Yangi so'rovnoma", "adm:new_poll")
-],
-
-[
-    _btn("🗑 Quizni o'chirish", "adm:del_quiz"),
-    _btn("📊 So'rovnomalar", "adm:polls")
-],
+        [_btn("➕ Yangi so'rovnoma", "adm:new_survey"), _btn("📋 So'rovnomalar", "adm:surveys")],
     ]
     if is_owner:
         rows.append([_btn("👤 Adminlar", "adm:admins")])
@@ -175,3 +167,40 @@ def poll_options_kb(poll_id, options):
     ]
 
     return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def survey_list_kb(surveys, prefix="survey"):
+    rows = []
+    for survey in surveys:
+        done = "✅" if survey["done"] else "📋"
+        rows.append([
+            _btn(
+                f"{done} {survey['title'][:42]} · {survey['n']} savol",
+                f"{prefix}:{survey['id']}"
+            )
+        ])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def survey_question_options_kb(survey_id, index, options):
+    rows = [
+        [_btn(option[:55], f"svans:{survey_id}:{index}:{i}")]
+        for i, option in enumerate(options)
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def survey_type_kb():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [_btn("🔘 Variantli savol", "svtype:choice")],
+        [_btn("✍️ Erkin matnli savol", "svtype:text")],
+        [_btn("✖️ Bekor qilish", "svcreate:cancel")]
+    ])
+
+
+def survey_continue_kb():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [_btn("➕ Yana savol qo'shish", "svcreate:add")],
+        [_btn("💾 So'rovnomani saqlash", "svcreate:save")],
+        [_btn("✖️ Bekor qilish", "svcreate:cancel")]
+    ])

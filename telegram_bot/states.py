@@ -36,3 +36,15 @@ class NewPoll(StatesGroup):
     title = State()
     question = State()
     options = State()
+
+
+class NewSurvey(StatesGroup):
+    title = State()
+    question = State()
+    question_type = State()
+    options = State()
+    continue_questions = State()
+
+
+class SurveyTaking(StatesGroup):
+    text_answer = State()

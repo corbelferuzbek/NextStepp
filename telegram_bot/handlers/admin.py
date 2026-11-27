@@ -6,7 +6,7 @@ from aiogram.exceptions import TelegramAPIError
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.types import BufferedInputFile, CallbackQuery, Message
-from states import AdminEdit, AdminReply, Broadcast, NewQuiz, NewPoll
+from states import AdminEdit, AdminReply, Broadcast, NewQuiz, NewSurvey
 import database as db
 from config import OWNER_ID
 from filters import PLAIN_TEXT, IsAdmin
@@ -16,10 +16,11 @@ from keyboards import (
     confirm_kb,
     finish_quiz_kb,
     quiz_list_kb,
-    poll_list_kb,
+    survey_list_kb,
+    survey_type_kb,
+    survey_continue_kb,
 )
 from services.broadcast import format_announcement, publish_announcement
-from states import AdminEdit, AdminReply, Broadcast, NewQuiz
 from ui import LINE, esc, header
 
 router = Router()
@@ -325,171 +326,199 @@ async def rm_admin_save(message: Message, state: FSMContext):
     await db.remove_admin(int(text))
     await state.clear()
     await message.answer("✅ Admin o'chirildi.")
-# ========== YANGI SO'ROVNOMA ==========
+# ========== KO'P SAVOLLI SO'ROVNOMA YARATISH ==========
 
-@router.callback_query(F.data == "adm:new_poll")
-async def new_poll_start(call: CallbackQuery, state: FSMContext):
-
-    await state.set_state(NewPoll.title)
-
-    await call.message.answer(
-        "📊 So'rovnoma nomini yuboring:"
+async def ask_next_survey_question(message: Message, state: FSMContext):
+    await state.set_state(NewSurvey.question)
+    await message.answer(
+        "✍️ Keyingi savol matnini yuboring.\n"
+        "So'rovnomani bekor qilish: /cancel"
     )
 
+
+@router.callback_query(F.data == "adm:new_survey")
+async def new_survey_start(call: CallbackQuery, state: FSMContext):
+    await state.clear()
+    await state.set_state(NewSurvey.title)
+    await state.update_data(survey_questions=[])
+    await call.message.answer("📋 Yangi so'rovnoma nomini yuboring:")
     await call.answer()
 
 
-@router.message(NewPoll.title, PLAIN_TEXT)
-async def poll_title(message: Message, state: FSMContext):
-
+@router.message(NewSurvey.title, PLAIN_TEXT)
+async def new_survey_title(message: Message, state: FSMContext):
     title = message.text.strip()
-
     if not title:
-        await message.answer("Nom bo'sh bo'lmasin.")
+        await message.answer("So'rovnoma nomi bo'sh bo'lmasin.")
         return
-
-    await state.update_data(
-        poll_title=title
-    )
-
-    await state.set_state(NewPoll.question)
-
-    await message.answer(
-        "So'rovnoma savolini yuboring:"
-    )
+    await state.update_data(survey_title=title, survey_questions=[])
+    await ask_next_survey_question(message, state)
 
 
-@router.message(NewPoll.question, PLAIN_TEXT)
-async def poll_question(message: Message, state: FSMContext):
-
+@router.message(NewSurvey.question, PLAIN_TEXT)
+async def new_survey_question(message: Message, state: FSMContext):
     question = message.text.strip()
-
     if not question:
-        await message.answer("Savol bo'sh bo'lmasin.")
+        await message.answer("Savol matni bo'sh bo'lmasin.")
         return
-
-    await state.update_data(
-        poll_question=question
-    )
-
-    await state.set_state(NewPoll.options)
-
+    await state.update_data(pending_question=question)
+    await state.set_state(NewSurvey.question_type)
     await message.answer(
-        "Variantlarni har birini yangi qatordan yuboring.\n"
-        "2–8 ta variant bo'lishi kerak.\n\n"
-        "Bu yerda + belgisi kerak emas.\n\n"
-        "<code>Online chat\n"
-        "Video darslar\n"
-        "AI yordamchi</code>"
+        "Savol turini tanlang:",
+        reply_markup=survey_type_kb()
     )
 
 
-@router.message(NewPoll.options, PLAIN_TEXT)
-async def poll_options(message: Message, state: FSMContext):
-
-    options = [
-        item.strip()
-        for item in message.text.splitlines()
-        if item.strip()
-    ]
-
-    if not 2 <= len(options) <= 8:
-        await message.answer(
-            "⚠️ 2 tadan 8 tagacha variant yuboring."
-        )
-        return
-
-    if len(set(options)) != len(options):
-        await message.answer(
-            "⚠️ Bir xil variantlarni takrorlamang."
-        )
+@router.callback_query(NewSurvey.question_type, F.data.startswith("svtype:"))
+async def new_survey_question_type(call: CallbackQuery, state: FSMContext):
+    kind = call.data.split(":", 1)[1]
+    if kind not in ("choice", "text"):
+        await call.answer("Noto'g'ri savol turi.", show_alert=True)
         return
 
     data = await state.get_data()
+    questions = data.get("survey_questions", [])
+    question = {"text": data["pending_question"], "type": kind, "options": []}
 
-    poll_id = await db.create_poll(
-        data["poll_title"],
-        data["poll_question"],
-        options
-    )
+    if kind == "text":
+        questions.append(question)
+        await state.update_data(survey_questions=questions)
+        await state.set_state(NewSurvey.continue_questions)
+        await call.message.answer(
+            f"✅ Matnli savol qo'shildi. Jami savollar: {len(questions)}",
+            reply_markup=survey_continue_kb()
+        )
+    else:
+        await state.update_data(pending_question_data=question)
+        await state.set_state(NewSurvey.options)
+        await call.message.answer(
+            "Variantlarni har birini yangi qatordan yuboring. 2–8 ta variant:\n\n"
+            "<code>Frontend\nBackend\nMobile</code>"
+        )
+    await call.answer()
 
-    await state.clear()
 
+@router.message(NewSurvey.options, PLAIN_TEXT)
+async def new_survey_options(message: Message, state: FSMContext):
+    options = [line.strip() for line in message.text.splitlines() if line.strip()]
+    if not 2 <= len(options) <= 8:
+        await message.answer("⚠️ 2 tadan 8 tagacha variant yuboring.")
+        return
+    if len(set(options)) != len(options):
+        await message.answer("⚠️ Bir xil variantlarni takrorlamang.")
+        return
+
+    data = await state.get_data()
+    question = data.get("pending_question_data")
+    if not question:
+        await state.clear()
+        await message.answer("Savol ma'lumoti topilmadi. Qaytadan boshlang.")
+        return
+
+    question["options"] = options
+    questions = data.get("survey_questions", [])
+    questions.append(question)
+    await state.update_data(survey_questions=questions, pending_question_data=None)
+    await state.set_state(NewSurvey.continue_questions)
     await message.answer(
-        "✅ <b>So'rovnoma yaratildi!</b>\n\n"
-        f"📊 {esc(data['poll_title'])}\n"
-        f"Variantlar: {len(options)}\n"
-        f"ID: <code>{poll_id}</code>"
+        f"✅ Variantli savol qo'shildi. Jami savollar: {len(questions)}",
+        reply_markup=survey_continue_kb()
     )
+
+
+@router.callback_query(NewSurvey.continue_questions, F.data == "svcreate:add")
+async def survey_add_question(call: CallbackQuery, state: FSMContext):
+    await ask_next_survey_question(call.message, state)
+    await call.answer()
+
+
+@router.callback_query(NewSurvey.continue_questions, F.data == "svcreate:save")
+async def survey_save(call: CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    questions = data.get("survey_questions", [])
+    if not questions:
+        await call.answer("Kamida bitta savol qo'shing.", show_alert=True)
+        return
+
+    survey_id = await db.create_survey(data["survey_title"], questions)
+    await state.clear()
+    await call.message.answer(
+        "🎉 <b>Ko'p savolli so'rovnoma yaratildi!</b>\n\n"
+        f"📋 {esc(data['survey_title'])}\n"
+        f"Savollar soni: <b>{len(questions)}</b>\n"
+        f"ID: <code>{survey_id}</code>"
+    )
+    await call.answer("Saqlandi!")
+
+
+@router.callback_query(F.data == "svcreate:cancel")
+async def survey_create_cancel(call: CallbackQuery, state: FSMContext):
+    await state.clear()
+    await call.message.answer("So'rovnoma yaratish bekor qilindi.")
+    await call.answer()
 
 
 # ========== SO'ROVNOMA NATIJALARI ==========
 
-@router.callback_query(F.data == "adm:polls")
-async def admin_poll_list(call: CallbackQuery):
-
-    polls = await db.list_polls()
-
-    if not polls:
-        await call.answer(
-            "So'rovnomalar mavjud emas.",
-            show_alert=True
-        )
+@router.callback_query(F.data == "adm:surveys")
+async def admin_survey_list(call: CallbackQuery):
+    surveys = await db.list_surveys()
+    if not surveys:
+        await call.answer("So'rovnomalar mavjud emas.", show_alert=True)
         return
-
     await call.message.answer(
-        "📊 Natijasini ko'rmoqchi bo'lgan so'rovnomani tanlang:",
-        reply_markup=poll_list_kb(
-            polls,
-            "pollres"
-        )
+        "Natijasini ko'rmoqchi bo'lgan so'rovnomani tanlang:",
+        reply_markup=survey_list_kb(surveys, "surveyres")
     )
-
     await call.answer()
 
 
-@router.callback_query(F.data.startswith("pollres:"))
-async def admin_poll_result(call: CallbackQuery):
-
-    poll_id = int(call.data.split(":")[1])
-
-    data = await db.poll_results(poll_id)
-
-    if not data:
-        await call.answer(
-            "So'rovnoma topilmadi.",
-            show_alert=True
-        )
+@router.callback_query(F.data.startswith("surveyres:"))
+async def admin_survey_result(call: CallbackQuery):
+    try:
+        survey_id = int(call.data.split(":")[1])
+    except (ValueError, IndexError):
+        await call.answer("Noto'g'ri so'rovnoma.", show_alert=True)
         return
 
+    result = await db.survey_results(survey_id)
+    if not result:
+        await call.answer("So'rovnoma topilmadi.", show_alert=True)
+        return
+
+    survey = result["survey"]
     lines = [
-        f"📊 <b>{esc(data['poll']['title'])}</b>",
-        "",
-        esc(data["poll"]["question"]),
+        f"📊 <b>{esc(survey['title'])}</b>",
+        f"Jami qatnashganlar: <b>{result['total']}</b>",
         ""
     ]
 
-    for index, option in enumerate(data["poll"]["options"]):
+    for index, question in enumerate(survey["questions"], start=1):
+        lines.append(f"<b>{index}. {esc(question['text'])}</b>")
+        answers = [
+            response["answers"].get(str(question["id"]), "")
+            for response in result["responses"]
+        ]
+        answers = [str(answer).strip() for answer in answers if str(answer).strip()]
 
-        count = data["counts"][index]
+        if question["type"] == "choice":
+            for option in question["options"]:
+                count = sum(1 for answer in answers if answer == option)
+                percent = round(count * 100 / result["total"]) if result["total"] else 0
+                lines.append(f"• {esc(option)} — <b>{count}</b> ({percent}%)")
+        else:
+            if answers:
+                lines.append(f"Javoblar: <b>{len(answers)}</b>")
+                for answer_no, answer in enumerate(answers[:20], start=1):
+                    lines.append(f"{answer_no}) {esc(answer[:500])}")
+                if len(answers) > 20:
+                    lines.append(f"... yana {len(answers) - 20} ta javob")
+            else:
+                lines.append("Hozircha matnli javob yo'q.")
+        lines.append("")
 
-        percentage = (
-            round(count * 100 / data["total"])
-            if data["total"]
-            else 0
-        )
-
-        lines.append(
-            f"{index + 1}. {esc(option)}"
-            f" — <b>{count}</b> ta ({percentage}%)"
-        )
-
-    lines.append(
-        f"\nJami ovoz: <b>{data['total']}</b>"
-    )
-
-    await call.message.answer(
-        "\n".join(lines)
-    )
-
+    text = "\n".join(lines)
+    # Telegram xabar chegarasidan oshmasligi uchun bo'laklab yuborish
+    for start in range(0, len(text), 3800):
+        await call.message.answer(text[start:start + 3800])
     await call.answer()

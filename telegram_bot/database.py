@@ -51,6 +51,27 @@ CREATE TABLE IF NOT EXISTS poll_votes (
     voted_at TEXT DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(poll_id, user_id)
 );
+CREATE TABLE IF NOT EXISTS surveys (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT NOT NULL,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS survey_questions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    survey_id INTEGER NOT NULL REFERENCES surveys(id) ON DELETE CASCADE,
+    position INTEGER NOT NULL,
+    text TEXT NOT NULL,
+    question_type TEXT NOT NULL CHECK(question_type IN ('choice', 'text')),
+    options TEXT NOT NULL DEFAULT '[]'
+);
+CREATE TABLE IF NOT EXISTS survey_responses (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    survey_id INTEGER NOT NULL REFERENCES surveys(id) ON DELETE CASCADE,
+    user_id INTEGER NOT NULL,
+    answers TEXT NOT NULL,
+    submitted_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(survey_id, user_id)
+);
 CREATE TABLE IF NOT EXISTS announcements (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     title TEXT NOT NULL,
@@ -428,3 +449,134 @@ async def delete_poll(poll_id):
         "DELETE FROM polls WHERE id = ?",
         (poll_id,)
     )
+
+
+# ---- Ko'p savolli so'rovnomalar ----
+async def create_survey(title, questions):
+    """Savollar ro'yxati bilan yangi so'rovnoma yaratadi."""
+    conn = await _connect()
+    try:
+        cur = await conn.execute(
+            "INSERT INTO surveys (title) VALUES (?)",
+            (title,)
+        )
+        survey_id = cur.lastrowid
+        for position, question in enumerate(questions):
+            await conn.execute(
+                """
+                INSERT INTO survey_questions
+                    (survey_id, position, text, question_type, options)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    survey_id,
+                    position,
+                    question["text"],
+                    question["type"],
+                    json.dumps(question.get("options", []), ensure_ascii=False)
+                )
+            )
+        await conn.commit()
+        return survey_id
+    finally:
+        await conn.close()
+
+
+async def list_surveys(user_id=0, limit=30):
+    return await _run(
+        """
+        SELECT s.id, s.title,
+               (SELECT COUNT(*) FROM survey_questions q WHERE q.survey_id=s.id) AS n,
+               EXISTS(
+                   SELECT 1 FROM survey_responses r
+                   WHERE r.survey_id=s.id AND r.user_id=?
+               ) AS done
+        FROM surveys s
+        ORDER BY s.id DESC
+        LIMIT ?
+        """,
+        (user_id, limit),
+        fetch="all"
+    )
+
+
+async def get_survey(survey_id):
+    survey = await _run(
+        "SELECT id, title FROM surveys WHERE id=?",
+        (survey_id,),
+        fetch="one"
+    )
+    if not survey:
+        return None
+    rows = await _run(
+        """
+        SELECT id, text, question_type, options
+        FROM survey_questions
+        WHERE survey_id=?
+        ORDER BY position, id
+        """,
+        (survey_id,),
+        fetch="all"
+    )
+    return {
+        "id": survey["id"],
+        "title": survey["title"],
+        "questions": [
+            {
+                "id": row["id"],
+                "text": row["text"],
+                "type": row["question_type"],
+                "options": json.loads(row["options"] or "[]")
+            }
+            for row in rows
+        ]
+    }
+
+
+async def has_completed_survey(survey_id, user_id):
+    row = await _run(
+        "SELECT 1 FROM survey_responses WHERE survey_id=? AND user_id=?",
+        (survey_id, user_id),
+        fetch="one"
+    )
+    return row is not None
+
+
+async def save_survey_response(survey_id, user_id, answers):
+    conn = await _connect()
+    try:
+        await conn.execute(
+            """
+            INSERT INTO survey_responses (survey_id, user_id, answers)
+            VALUES (?, ?, ?)
+            """,
+            (survey_id, user_id, json.dumps(answers, ensure_ascii=False))
+        )
+        await conn.commit()
+        return True
+    except Exception as error:
+        if "UNIQUE constraint failed" in str(error):
+            return False
+        raise
+    finally:
+        await conn.close()
+
+
+async def survey_results(survey_id):
+    survey = await get_survey(survey_id)
+    if not survey:
+        return None
+    rows = await _run(
+        "SELECT user_id, answers, submitted_at FROM survey_responses WHERE survey_id=? ORDER BY id",
+        (survey_id,),
+        fetch="all"
+    )
+    responses = [
+        {
+            "user_id": row["user_id"],
+            "answers": json.loads(row["answers"]),
+            "submitted_at": row["submitted_at"]
+        }
+        for row in rows
+    ]
+    return {"survey": survey, "responses": responses, "total": len(responses)}
